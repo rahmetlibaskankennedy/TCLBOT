@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import asyncio
 import gspread
 from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -9,7 +10,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes
 
 # =============================================
-# HTTP Sunucusu — Render için (port açık tutmak)
+# HTTP Sunucusu — Render için
 # =============================================
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -21,18 +22,18 @@ class Handler(BaseHTTPRequestHandler):
 Thread(target=lambda: HTTPServer(("0.0.0.0", 10000), Handler).serve_forever(), daemon=True).start()
 
 # =============================================
-# AYARLAR — Render Environment Variables
+# AYARLAR
 # =============================================
-TELEGRAM_TOKEN  = os.environ["TELEGRAM_TOKEN"]
-TABLO_ADI       = os.environ.get("TABLO_ADI", "bilgi_tabani")
+TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
+TABLO_ADI      = os.environ.get("TABLO_ADI", "bilgi_tabani")
 
-SCOPES          = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-hesap_bilgisi   = json.loads(os.environ["GOOGLE_CREDENTIALS"])
-kimlik          = Credentials.from_service_account_info(hesap_bilgisi, scopes=SCOPES)
-gc              = gspread.authorize(kimlik)
+SCOPES       = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+hesap_bilgisi = json.loads(os.environ["GOOGLE_CREDENTIALS"])
+kimlik        = Credentials.from_service_account_info(hesap_bilgisi, scopes=SCOPES)
+gc            = gspread.authorize(kimlik)
 
 # =============================================
-# Cache — 60 saniyede bir taze okur
+# Cache
 # =============================================
 _cache = {"veri": {}, "zaman": 0}
 CACHE_SURE = 60
@@ -73,7 +74,7 @@ async def mesaj_isle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(tablo[etiket])
 
 # =============================================
-# /guncelle komutu — cache'i sıfırlar
+# /guncelle komutu
 # =============================================
 async def guncelle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _cache["zaman"] = 0
@@ -86,17 +87,20 @@ async def guncelle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =============================================
 # Ana döngü — hata olunca yeniden bağlanır
 # =============================================
-def main():
-    print("✅ Bot çalışıyor...")
+async def main():
     while True:
         try:
             app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
             app.add_handler(CommandHandler("guncelle", guncelle))
             app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, mesaj_isle))
-            app.run_polling(drop_pending_updates=True)
+            print("✅ Bot çalışıyor...")
+            async with app:
+                await app.start()
+                await app.updater.start_polling(drop_pending_updates=True)
+                await asyncio.Event().wait()  # sonsuza kadar bekle
         except Exception as e:
             print(f"⚠️ Hata, 5 saniye sonra yeniden bağlanıyor: {e}")
-            time.sleep(5)
+            await asyncio.sleep(5)
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
