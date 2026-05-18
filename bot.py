@@ -1,28 +1,44 @@
 import os
 import json
+import time
 import gspread
+from threading import Thread
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from google.oauth2.service_account import Credentials
 from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
+from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes
 
 # =============================================
-# AYARLAR — Render Environment Variables'dan okunur
+# HTTP Sunucusu — Render için (port açık tutmak)
 # =============================================
-TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+    def log_message(self, *args):
+        pass
 
-SCOPES = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-hesap_bilgisi = json.loads(os.environ["GOOGLE_CREDENTIALS"])
-kimlik = Credentials.from_service_account_info(hesap_bilgisi, scopes=SCOPES)
-gc = gspread.authorize(kimlik)
+def http_baslat():
+    HTTPServer(("0.0.0.0", 10000), Handler).serve_forever()
 
-TABLO_ADI = os.environ.get("TABLO_ADI", "bilgi_tabani")
+Thread(target=http_baslat, daemon=True).start()
 
 # =============================================
-# Basit cache — her 60 saniyede bir taze okur
+# AYARLAR — Render Environment Variables
 # =============================================
-import time
+TELEGRAM_TOKEN  = os.environ["TELEGRAM_TOKEN"]
+TABLO_ADI       = os.environ.get("TABLO_ADI", "bilgi_tabani")
+
+SCOPES          = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+hesap_bilgisi   = json.loads(os.environ["GOOGLE_CREDENTIALS"])
+kimlik          = Credentials.from_service_account_info(hesap_bilgisi, scopes=SCOPES)
+gc              = gspread.authorize(kimlik)
+
+# =============================================
+# Cache — 60 saniyede bir taze okur
+# =============================================
 _cache = {"veri": {}, "zaman": 0}
-CACHE_SURE = 60  # saniye
+CACHE_SURE = 60
 
 def tabloyu_oku():
     simdi = time.time()
@@ -62,8 +78,6 @@ async def mesaj_isle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =============================================
 # /guncelle komutu — cache'i sıfırlar
 # =============================================
-from telegram.ext import CommandHandler
-
 async def guncelle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _cache["zaman"] = 0
     try:
