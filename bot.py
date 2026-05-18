@@ -18,10 +18,7 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
-def http_baslat():
-    HTTPServer(("0.0.0.0", 10000), Handler).serve_forever()
-
-Thread(target=http_baslat, daemon=True).start()
+Thread(target=lambda: HTTPServer(("0.0.0.0", 10000), Handler).serve_forever(), daemon=True).start()
 
 # =============================================
 # AYARLAR — Render Environment Variables
@@ -87,12 +84,19 @@ async def guncelle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Hata: {e}")
 
 # =============================================
+# Ana döngü — hata olunca yeniden bağlanır
+# =============================================
 def main():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-    app.add_handler(CommandHandler("guncelle", guncelle))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, mesaj_isle))
     print("✅ Bot çalışıyor...")
-    app.run_polling()
+    while True:
+        try:
+            app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+            app.add_handler(CommandHandler("guncelle", guncelle))
+            app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, mesaj_isle))
+            app.run_polling(drop_pending_updates=True)
+        except Exception as e:
+            print(f"⚠️ Hata, 5 saniye sonra yeniden bağlanıyor: {e}")
+            time.sleep(5)
 
 if __name__ == "__main__":
     main()
