@@ -7,6 +7,7 @@ from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from google.oauth2.service_account import Credentials
 from telegram import Update
+from telegram.error import NetworkError, TimedOut
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes
 
 # =============================================
@@ -27,7 +28,7 @@ Thread(target=lambda: HTTPServer(("0.0.0.0", 10000), Handler).serve_forever(), d
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 TABLO_ADI      = os.environ.get("TABLO_ADI", "bilgi_tabani")
 
-SCOPES       = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+SCOPES        = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 hesap_bilgisi = json.loads(os.environ["GOOGLE_CREDENTIALS"])
 kimlik        = Credentials.from_service_account_info(hesap_bilgisi, scopes=SCOPES)
 gc            = gspread.authorize(kimlik)
@@ -85,22 +86,47 @@ async def guncelle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Hata: {e}")
 
 # =============================================
-# Ana döngü — hata olunca yeniden bağlanır
+# Hata işleyici — NetworkError'ları sessizce geç
+# =============================================
+async def hata_isle(update: object, context: ContextTypes.DEFAULT_TYPE):
+    if isinstance(context.error, (NetworkError, TimedOut)):
+        print(f"⚠️ Bağlantı hatası (otomatik düzelecek): {context.error}")
+    else:
+        print(f"❌ Beklenmeyen hata: {context.error}")
+
+# =============================================
+# Ana döngü
 # =============================================
 async def main():
     while True:
         try:
-            app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+            app = (
+                ApplicationBuilder()
+                .token(TELEGRAM_TOKEN)
+                .connect_timeout(30)
+                .read_timeout(30)
+                .write_timeout(30)
+                .build()
+            )
             app.add_handler(CommandHandler("guncelle", guncelle))
             app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, mesaj_isle))
+            app.add_error_handler(hata_isle)
+
             print("✅ Bot çalışıyor...")
             async with app:
                 await app.start()
-                await app.updater.start_polling(drop_pending_updates=True)
-                await asyncio.Event().wait()  # sonsuza kadar bekle
+                await app.updater.start_polling(
+                    drop_pending_updates=True,
+                    allowed_updates=["message"]
+                )
+                await asyncio.Event().wait()
+
+        except (NetworkError, TimedOut) as e:
+            print(f"⚠️ Ağ hatası, 10 saniye sonra yeniden bağlanıyor: {e}")
+            await asyncio.sleep(10)
         except Exception as e:
-            print(f"⚠️ Hata, 5 saniye sonra yeniden bağlanıyor: {e}")
-            await asyncio.sleep(5)
+            print(f"❌ Kritik hata, 10 saniye sonra yeniden başlıyor: {e}")
+            await asyncio.sleep(10)
 
 if __name__ == "__main__":
     asyncio.run(main())
